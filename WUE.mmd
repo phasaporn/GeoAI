@@ -1,0 +1,99 @@
+%% WUE.mmd - ขั้นตอนการทำงานของ WUE.py
+%% คำนวณ Water Use Efficiency (WUE = GPP / ET) บริเวณประเทศไทย ด้วย Google Earth Engine
+%% ใช้งานได้บน draw.io (Extras > Edit Diagram > Mermaid หรือ Arrange > Insert > Mermaid)
+flowchart TD
+
+    START(["เริ่มต้น (รัน WUE.py)"])
+
+    subgraph CONFIG["1 - ตั้งค่าพารามิเตอร์"]
+        direction TB
+        C1["PROJECT_ID = Phasaporn-aroonjaroensuk"]
+        C2["OUTPUT_HTML = WUE.html"]
+        C3["THAILAND_GEOJSON = Example/Thailand_simple.geojson"]
+        C4["ช่วงเวลา: START_DATE = 2024-01-01<br>END_DATE = 2025-01-01"]
+        C5["FILL_THRESHOLD = 32761<br>(ค่าตั้งแต่ค่านี้ขึ้นไปคือ น้ำ/เมฆ/ไม่มีข้อมูล)"]
+        C1 --> C2 --> C3 --> C4 --> C5
+    end
+
+    subgraph AUTH["2 - เชื่อมต่อ Google Earth Engine : initialize_ee"]
+        direction TB
+        A1{"ee.Initialize สำเร็จหรือไม่<br>(ลอง PROJECT_ID และตัวพิมพ์เล็ก)"}
+        A2["ใช้ session เดิม<br>เชื่อมต่อสำเร็จ"]
+        A3["ee.Authenticate<br>(auth_mode = localhost)<br>ยืนยันตัวตนผ่านเบราว์เซอร์"]
+        A4["ee.Initialize อีกครั้ง<br>หลังได้ credentials"]
+        A1 -->|สำเร็จ| A2
+        A1 -->|ล้มเหลว| A3 --> A4
+    end
+
+    subgraph ROIDEF["3 - กำหนดขอบเขตพื้นที่ (ROI)"]
+        direction TB
+        R1{"มีไฟล์ Thailand_simple.geojson หรือไม่"}
+        R2["อ่าน GeoJSON แล้วสร้าง<br>ee.FeatureCollection"]
+        R3["ทางเลือกสำรอง: FAO/GAUL/2015/level0<br>กรอง ADM0_NAME = Thailand"]
+        R1 -->|มี| R2
+        R1 -->|ไม่มี| R3
+    end
+
+    subgraph GPPBRANCH["4 - เตรียมข้อมูล GPP : MOD17A2HGF"]
+        direction TB
+        G1["โหลด ImageCollection<br>MODIS/061/MOD17A2HGF"]
+        G2["filterDate(2024) + filterBounds(ROI)"]
+        G3["map(scale_gpp) รายภาพ:<br>1) ตัด fill value (Gpp &lt; 32761)<br>2) x 0.0001 => kgC/m2/8day<br>3) x 1000 => gC/m2/8day"]
+        G1 --> G2 --> G3
+    end
+
+    subgraph ETBRANCH["5 - เตรียมข้อมูล ET : MOD16A2GF"]
+        direction TB
+        E1["โหลด ImageCollection<br>MODIS/061/MOD16A2GF"]
+        E2["filterDate(2024) + filterBounds(ROI)"]
+        E3["map(scale_et) รายภาพ:<br>1) ตัด fill value (ET &lt; 32761)<br>2) x 0.1 => mm/8day<br>(1 kg/m2 = 1 mm)"]
+        E1 --> E2 --> E3
+    end
+
+    CHECK["ตรวจจำนวนภาพ<br>gpp_coll.size() และ et_coll.size()<br>(คาดว่า 46 ภาพต่อชุด)"]
+
+    subgraph WUECALC["6 - รวมรายปีและคำนวณ WUE"]
+        direction TB
+        W1["gpp_annual = gpp_coll.sum().clip(ROI)<br>=> GPP รวม gC/m2/ปี"]
+        W2["et_annual = et_coll.sum().clip(ROI)<br>=> ET รวม mm/ปี"]
+        W3["ป้องกันหารศูนย์:<br>et_annual_safe = et_annual ที่ &gt; 1 mm/ปี"]
+        W4["WUE = gpp_annual / et_annual_safe<br>=> gC/m2 ต่อ mm = gC/kg H2O"]
+        W1 --> W3
+        W2 --> W3 --> W4
+    end
+
+    STATS["7 - สถิติทั้งประเทศ<br>wue.reduceRegion(mean, min, max)<br>scale = 5000 m<br>พิมพ์ค่าเฉลี่ย/ต่ำสุด/สูงสุด"]
+
+    subgraph MAP["8 - สร้างแผนที่ด้วย geemap"]
+        direction TB
+        M1["geemap.Map(center=[13.5, 101], zoom=6)<br>add_basemap(HYBRID) = Google Hybrid"]
+        M2["addLayer: WUE ปี 2024 (แสดง)"]
+        M3["addLayer: GPP รวมปี (ซ่อน)"]
+        M4["addLayer: ET รวมปี (ซ่อน)"]
+        M5["addLayer: ขอบเขตประเทศไทย (เส้นแดง)"]
+        M6["add_colorbar: WUE (gC/kg H2O) แนวนอน"]
+        M1 --> M2 --> M3 --> M4 --> M5 --> M6
+    end
+
+    EXPORT["9 - บันทึกไฟล์<br>m.to_html(WUE.html)<br>title = Water Use Efficiency - Thailand"]
+    END(["จบการทำงาน"])
+
+    START --> CONFIG --> AUTH --> ROIDEF
+    ROIDEF --> GPPBRANCH
+    ROIDEF --> ETBRANCH
+    GPPBRANCH --> CHECK
+    ETBRANCH --> CHECK
+    CHECK --> WUECALC --> STATS --> MAP --> EXPORT --> END
+
+    %% กำหนดสไตล์เพื่อความอ่านง่าย
+    classDef startend fill:#2b8a3e,stroke:#1b4332,color:#ffffff;
+    classDef gpp fill:#e6f4d7,stroke:#238443,color:#1b3a1b;
+    classDef et fill:#fde5d0,stroke:#d7191c,color:#5a1a1a;
+    classDef wue fill:#d0ebff,stroke:#1971c2,color:#0b3d66;
+    classDef proc fill:#f1f3f5,stroke:#868e96,color:#212529;
+
+    class START,END startend;
+    class G1,G2,G3 gpp;
+    class E1,E2,E3 et;
+    class W1,W2,W3,W4 wue;
+    class C1,C2,C3,C4,C5,A2,A3,A4,R2,R3,CHECK,STATS,M1,M2,M3,M4,M5,M6,EXPORT proc;

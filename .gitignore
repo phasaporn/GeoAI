@@ -43,6 +43,10 @@ Desktop.ini
 # GeoAI / data (ปรับตามต้องการ)
 *.tif
 *.tiff
+# ไฟล์ sidecar ของ raster ที่ไม่มีประโยชน์เมื่อไม่มีตัว .tif
+*.ovr
+*.tif.aux.xml
+*.tfw
 *.shp.zip
 data/
 outputs/
